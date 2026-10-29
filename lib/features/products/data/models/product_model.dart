@@ -1,4 +1,4 @@
-import 'package:ecom/features/products/data/models/sub_category_model.dart';
+import 'package:ecom/features/categories/data/models/sub_category_model.dart';
 import 'package:equatable/equatable.dart';
 
 import '../../domain/entities/product_entity.dart';
