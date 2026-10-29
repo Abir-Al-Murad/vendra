@@ -3,7 +3,7 @@ import 'package:equatable/equatable.dart';
 
 import '../../domain/entities/product_entity.dart';
 import '../../../brand/data/models/brand_model.dart';
-import 'category_model.dart';
+import '../../../categories/data/models/category_model.dart';
 
 class ProductModel extends Equatable {
   final int sold;

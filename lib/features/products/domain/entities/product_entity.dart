@@ -1,7 +1,7 @@
 import 'package:ecom/features/products/domain/entities/sub_category_enitity.dart';
 
 import '../../../brand/domain/entities/brand_entity.dart';
-import 'category_entity.dart';
+import '../../../categories/domain/entities/category_entity.dart';
 
 class ProductEntity {
   final int sold;
