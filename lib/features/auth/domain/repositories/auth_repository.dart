@@ -33,6 +33,10 @@ abstract class AuthRepository {
     required String newPassword,
   });
 
+  Future<String> verifyToken({
+    required String token,
+  });
+
   Future<void> updateLoggedUserData({
     required String name,
     required String email,

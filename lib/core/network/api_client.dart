@@ -1,86 +1,125 @@
 import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:logger/logger.dart';
+
 import '../failures/failure.dart';
 import '../services/auth_storage.dart';
 import 'api_response.dart';
 
-final apiClientProvider = Provider<ApiClient>((ref)=>ApiClient(ref: ref));
+enum ApiVersion { v1, v2 }
+
+final apiClientProvider = Provider<ApiClient>((ref) {
+  return ApiClient(ref: ref);
+});
 
 class ApiClient {
   final Dio _dio;
-  final String baseUrl;
   final Logger _logger = Logger();
   final Ref ref;
 
-  ApiClient({
-    required this.ref,
-    Dio? dio,
-    // this.baseUrl = "http://192.168.10.128:8000/api/v1"
-    this.baseUrl = "https://ecommerce.routemisr.com/api/v1"
-  }) : _dio = dio ??
-      Dio(
-        BaseOptions(
-          baseUrl: baseUrl,
-          connectTimeout: const Duration(seconds: 30),
-          receiveTimeout: const Duration(seconds: 30),
-          sendTimeout: const Duration(seconds: 30),
-          contentType: Headers.jsonContentType,
-          responseType: ResponseType.json,
-        ),
-      ) {
+  static const String _baseUrl = 'https://ecom-api-1.onrender.com/api';
+
+  ApiClient({required this.ref, Dio? dio})
+    : _dio =
+          dio ??
+          Dio(
+            BaseOptions(
+              baseUrl: _baseUrl,
+              connectTimeout: const Duration(seconds: 30),
+              receiveTimeout: const Duration(seconds: 30),
+              sendTimeout: const Duration(seconds: 30),
+              contentType: Headers.jsonContentType,
+              responseType: ResponseType.json,
+            ),
+          ) {
     _addInterceptors();
   }
 
-  // ─── Interceptors ──────────────────────────────────────────────
-  void _addInterceptors() {
-    _dio.interceptors.clear();
-    _dio.interceptors.add(InterceptorsWrapper(
-      onRequest: _onRequest,
-      onResponse: _onResponse,
-      onError: _onError,
-    ));
+  // ---------------------------------------------------------------------------
+  // API VERSION
+  // ---------------------------------------------------------------------------
+
+  String _versionedPath(String path, ApiVersion version) {
+    final normalizedPath = path.startsWith('/') ? path : '/$path';
+    final versionPrefix = '/${version.name}';
+
+    if (normalizedPath == versionPrefix ||
+        normalizedPath.startsWith('$versionPrefix/')) {
+      return normalizedPath;
+    }
+
+    return '$versionPrefix$normalizedPath';
   }
 
-  Future<void> _onRequest(RequestOptions options, RequestInterceptorHandler handler) async {
+  // ---------------------------------------------------------------------------
+  // INTERCEPTORS
+  // ---------------------------------------------------------------------------
+
+  void _addInterceptors() {
+    _dio.interceptors.clear();
+
+    _dio.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: _onRequest,
+        onResponse: _onResponse,
+        onError: _onError,
+      ),
+    );
+  }
+
+  Future<void> _onRequest(
+    RequestOptions options,
+    RequestInterceptorHandler handler,
+  ) async {
     final token = await AuthStorage.instance.getAccessToken();
+
     if (token != null) {
       options.headers['Authorization'] = 'Bearer $token';
     }
+
     _logRequest(options);
-    return handler.next(options);
+    handler.next(options);
   }
 
   void _onResponse(Response response, ResponseInterceptorHandler handler) {
     _logResponse(response);
-    return handler.next(response);
+    handler.next(response);
   }
 
-  Future<void> _onError(DioException error, ErrorInterceptorHandler handler) async {
+  Future<void> _onError(
+    DioException error,
+    ErrorInterceptorHandler handler,
+  ) async {
     _logError(error);
-    // Token refresh on 401 (except for refresh endpoint)
+
     if (error.response?.statusCode == 401 &&
         !error.requestOptions.path.contains('/auth/refresh')) {
       final newToken = await _refreshToken();
+
       if (newToken != null) {
-        await AuthStorage.instance.saveAccessToken(newToken);
-        error.requestOptions.headers['Authorization'] = 'Bearer $newToken';
+        final requestOptions = error.requestOptions;
+        requestOptions.headers['Authorization'] = 'Bearer $newToken';
+
         try {
-          final retryResponse = await _dio.fetch(error.requestOptions);
-          return handler.resolve(retryResponse);
+          final retryResponse = await _dio.fetch(requestOptions);
+          handler.resolve(retryResponse);
+          return;
         } on DioException catch (e) {
-          return handler.next(e);
+          handler.next(e);
+          return;
         }
-      } else {
-        // await _clearSessionAndLogout();
-        return handler.next(error);
       }
     }
-    return handler.next(error);
+
+    handler.next(error);
   }
 
-  // ─── Token Refresh ─────────────────────────────────────────────
+  // ---------------------------------------------------------------------------
+  // TOKEN REFRESH
+  // ---------------------------------------------------------------------------
+
   bool _isRefreshing = false;
   Completer<String?>? _refreshCompleter;
 
@@ -94,28 +133,36 @@ class ApiClient {
 
     try {
       final refreshToken = await AuthStorage.instance.getRefreshToken();
+
       if (refreshToken == null) {
         _refreshCompleter!.complete(null);
         return null;
       }
 
       final response = await _dio.post(
-        '/auth/refresh',
+        '/v1/auth/refresh',
         data: {'refresh_token': refreshToken},
+        options: Options(headers: {'Authorization': null}),
       );
 
       if (response.statusCode == 200) {
-        final newToken = response.data['access_token'] as String?;
+        final newToken = response.data is Map
+            ? response.data['access_token'] as String?
+            : null;
+
         if (newToken != null) {
           await AuthStorage.instance.saveAccessToken(newToken);
           _refreshCompleter!.complete(newToken);
           return newToken;
         }
       }
+
       _refreshCompleter!.complete(null);
       return null;
-    } catch (e) {
-      _refreshCompleter!.complete(null);
+    } catch (_) {
+      if (!(_refreshCompleter?.isCompleted ?? true)) {
+        _refreshCompleter!.complete(null);
+      }
       return null;
     } finally {
       _isRefreshing = false;
@@ -123,217 +170,246 @@ class ApiClient {
     }
   }
 
-  // Future<void> _clearSessionAndLogout() async {
-  //   invalidateUserProviders(ref.read);
-  //   await AuthStorage.instance.clearTokens();
-  //
-  //   AppRoutes.router.goNamed(AppRoutesName.widgetTree);
-  //   debugPrint('Session expired. User logged out.');
-  // }
+  // ---------------------------------------------------------------------------
+  // LOGGING
+  // ---------------------------------------------------------------------------
 
-  // ─── Logging ──────────────────────────────────────────────────
   void _logRequest(RequestOptions options) {
     _logger.i(
       '┌───────────────────────────────────────────\n'
-          '│ REQUEST: ${options.method} ${options.uri}\n'
-          '│ Headers: ${options.headers}\n'
-          '│ Data: ${options.data}\n'
-          '└───────────────────────────────────────────',
+      '│ REQUEST: ${options.method} ${options.uri}\n'
+      '│ Headers: ${options.headers}\n'
+      '│ Data: ${options.data}\n'
+      '└───────────────────────────────────────────',
     );
   }
 
   void _logResponse(Response response) {
     _logger.i(
       '┌───────────────────────────────────────────\n'
-          '│ RESPONSE: ${response.statusCode} ${response.requestOptions.uri}\n'
-          '│ Data: ${response.data}\n'
-          '└───────────────────────────────────────────',
+      '│ RESPONSE: ${response.statusCode} ${response.requestOptions.uri}\n'
+      '│ Data: ${response.data}\n'
+      '└───────────────────────────────────────────',
     );
   }
 
   void _logError(DioException error) {
     _logger.e(
       '┌───────────────────────────────────────────\n'
-          '│ REQUEST : ${error.requestOptions.method} ${error.requestOptions.uri}\n'
-          '│ PATH    : ${error.requestOptions.path}\n'
-          '│ QUERY   : ${error.requestOptions.queryParameters}\n'
-          '│ BODY    : ${error.requestOptions.data}\n'
-          '│\n'
-          '│ STATUS  : ${error.response?.statusCode}\n'
-          '│ RESPONSE: ${error.response?.data}\n'
-          '└───────────────────────────────────────────',
+      '│ REQUEST : ${error.requestOptions.method} ${error.requestOptions.uri}\n'
+      '│ PATH    : ${error.requestOptions.path}\n'
+      '│ QUERY   : ${error.requestOptions.queryParameters}\n'
+      '│ BODY    : ${error.requestOptions.data}\n'
+      '│ STATUS  : ${error.response?.statusCode}\n'
+      '│ RESPONSE: ${error.response?.data}\n'
+      '└───────────────────────────────────────────',
     );
   }
 
-
-  // ─── HTTP Methods ─────────────────────────────────────────────
-
+  // ---------------------------------------------------------------------------
   // GET
+  // ---------------------------------------------------------------------------
+
   Future<ApiResponse> get(
-      String path, {
-        Map<String, dynamic>? queryParameters,
-        Options? options,
-      }) async {
+    String path, {
+    ApiVersion version = ApiVersion.v1,
+    Map<String, dynamic>? queryParameters,
+    Options? options,
+  }) async {
     try {
       final response = await _dio.get(
-        path,
+        _versionedPath(path, version),
         queryParameters: queryParameters,
         options: options,
       );
+
       return _handleResponse(response);
     } on DioException catch (e) {
       return _handleError(e);
     }
   }
 
+  // ---------------------------------------------------------------------------
   // POST
+  // ---------------------------------------------------------------------------
+
   Future<ApiResponse> post(
-      String path, {
-        Map<String, dynamic>? data,
-        Map<String, dynamic>? queryParameters,
-        Options? options,
-      }) async {
+    String path, {
+    ApiVersion version = ApiVersion.v1,
+    Map<String, dynamic>? data,
+    Map<String, dynamic>? queryParameters,
+    Options? options,
+  }) async {
     try {
       final response = await _dio.post(
-        path,
+        _versionedPath(path, version),
         data: data,
         queryParameters: queryParameters,
         options: options,
       );
+
       return _handleResponse(response);
     } on DioException catch (e) {
       return _handleError(e);
     }
   }
 
+  // ---------------------------------------------------------------------------
   // PUT
-  Future<ApiResponse> put(
-      String path, {
-        Map<String, dynamic>? data,
-        Map<String, dynamic>? queryParameters,
-        Options? options,
-      }) async {
+  // ---------------------------------------------------------------------------
 
+  Future<ApiResponse> put(
+    String path, {
+    ApiVersion version = ApiVersion.v1,
+    Map<String, dynamic>? data,
+    Map<String, dynamic>? queryParameters,
+    Options? options,
+  }) async {
     try {
       final response = await _dio.put(
-        path,
+        _versionedPath(path, version),
         data: data,
         queryParameters: queryParameters,
         options: options,
       );
+
       return _handleResponse(response);
     } on DioException catch (e) {
       return _handleError(e);
     }
   }
 
-  // PUT Multipart
-  Future<ApiResponse> putMultipart(
-      String path, {
-        required FormData formData,
-        Map<String, dynamic>? queryParameters,
-        Options? options,
-        ProgressCallback? onSendProgress,
-      }) async {
+  // ---------------------------------------------------------------------------
+  // PUT MULTIPART
+  // ---------------------------------------------------------------------------
 
+  Future<ApiResponse> putMultipart(
+    String path, {
+    ApiVersion version = ApiVersion.v1,
+    required FormData formData,
+    Map<String, dynamic>? queryParameters,
+    Options? options,
+    ProgressCallback? onSendProgress,
+  }) async {
     try {
       final response = await _dio.put(
-        path,
+        _versionedPath(path, version),
         data: formData,
         queryParameters: queryParameters,
-        options: options ??
-            Options(
-              contentType: 'multipart/form-data',
-            ),
+        options: options ?? Options(contentType: 'multipart/form-data'),
         onSendProgress: onSendProgress,
       );
+
       return _handleResponse(response);
     } on DioException catch (e) {
       return _handleError(e);
     }
   }
 
+  // ---------------------------------------------------------------------------
   // PATCH
-  Future<ApiResponse> patch(
-      String path, {
-        Map<String, dynamic>? data,
-        Map<String, dynamic>? queryParameters,
-        Options? options,
-      }) async {
+  // ---------------------------------------------------------------------------
 
+  Future<ApiResponse> patch(
+    String path, {
+    ApiVersion version = ApiVersion.v1,
+    Map<String, dynamic>? data,
+    Map<String, dynamic>? queryParameters,
+    Options? options,
+  }) async {
     try {
       final response = await _dio.patch(
-        path,
+        _versionedPath(path, version),
         data: data,
         queryParameters: queryParameters,
         options: options,
       );
+
       return _handleResponse(response);
     } on DioException catch (e) {
       return _handleError(e);
     }
   }
 
+  // ---------------------------------------------------------------------------
   // DELETE
+  // ---------------------------------------------------------------------------
+
   Future<ApiResponse> delete(
-      String path, {
-        Map<String, dynamic>? data,
-        Map<String, dynamic>? queryParameters,
-        Options? options,
-      }) async {
+    String path, {
+    ApiVersion version = ApiVersion.v1,
+    Map<String, dynamic>? data,
+    Map<String, dynamic>? queryParameters,
+    Options? options,
+  }) async {
     try {
       final response = await _dio.delete(
-        path,
+        _versionedPath(path, version),
         data: data,
         queryParameters: queryParameters,
         options: options,
       );
+
       return _handleResponse(response);
     } on DioException catch (e) {
       return _handleError(e);
     }
   }
 
-  // POST Multipart
+  // ---------------------------------------------------------------------------
+  // POST MULTIPART
+  // ---------------------------------------------------------------------------
+
   Future<ApiResponse> postMultipart(
-      String path, {
-        required FormData formData,
-        Map<String, dynamic>? queryParameters,
-        Options? options,
-        ProgressCallback? onSendProgress,
-      }) async {
+    String path, {
+    ApiVersion version = ApiVersion.v1,
+    required FormData formData,
+    Map<String, dynamic>? queryParameters,
+    Options? options,
+    ProgressCallback? onSendProgress,
+  }) async {
     try {
       final response = await _dio.post(
-        path,
+        _versionedPath(path, version),
         data: formData,
         queryParameters: queryParameters,
-        options: options ??
-            Options(
-              contentType: 'multipart/form-data',
-            ),
+        options: options ?? Options(contentType: 'multipart/form-data'),
         onSendProgress: onSendProgress,
       );
+
       return _handleResponse(response);
     } on DioException catch (e) {
       return _handleError(e);
     }
   }
 
-  // ─── Response / Error Handling ─────────────────────────────────
+  // ---------------------------------------------------------------------------
+  // RESPONSE HANDLING
+  // ---------------------------------------------------------------------------
+
   ApiResponse _handleResponse(Response<dynamic> response) {
-    final isSuccess = response.statusCode != null &&
+    final isSuccess =
+        response.statusCode != null &&
         response.statusCode! >= 200 &&
         response.statusCode! < 300;
 
+    final data = response.data;
+
+    final message = data is Map
+        ? (data['message']?.toString() ?? response.statusMessage)
+        : response.statusMessage;
+
     return ApiResponse(
-      body: response.data,
+      body: data,
       isSuccess: isSuccess,
       statusCode: response.statusCode ?? 0,
-      errorMessage: isSuccess
-          ? null
-          : response.data?['message'] ?? response.statusMessage,
+      errorMessage: isSuccess ? null : message,
     );
   }
+
+  // ---------------------------------------------------------------------------
+  // ERROR HANDLING
+  // ---------------------------------------------------------------------------
 
   ApiResponse _handleError(DioException error) {
     final statusCode = error.response?.statusCode ?? 0;
@@ -356,14 +432,18 @@ class ApiClient {
         break;
 
       case DioExceptionType.badResponse:
-        final serverMsg = data is Map ? (data['message'] ?? data['error']??data['detail']) : null;
-        message = serverMsg ?? 'Server error';
+        final serverMsg = data is Map
+            ? (data['message'] ?? data['error'] ?? data['detail'])
+            : null;
+
+        message = serverMsg?.toString() ?? 'Server error';
         failure = ServerFailure(message);
         break;
 
       default:
         message = error.message ?? 'Something went wrong';
         failure = UnknownFailure(message);
+        break;
     }
 
     return ApiResponse(
@@ -372,17 +452,6 @@ class ApiClient {
       statusCode: statusCode,
       errorMessage: message,
       failure: failure,
-    );
-  }
-
-  // ─── Helper to return no internet response ─────────────────────
-  ApiResponse _noInternetResponse() {
-    return ApiResponse(
-      body: {},
-      isSuccess: false,
-      statusCode: 0,
-      errorMessage: 'No internet connection',
-      failure: const NetworkFailure('No internet connection'),
     );
   }
 }

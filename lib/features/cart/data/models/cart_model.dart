@@ -1,9 +1,5 @@
 import 'package:equatable/equatable.dart';
-
 import 'package:ecom/features/cart/domain/entities/cart_entity.dart';
-import 'package:ecom/features/brand/data/models/brand_model.dart';
-import 'package:ecom/features/categories/data/models/category_model.dart';
-import 'package:ecom/features/categories/data/models/sub_category_model.dart';
 
 import 'cart_item_model.dart';
 

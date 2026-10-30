@@ -1,9 +1,6 @@
 import 'package:ecom/common/models/meta_data_model.dart';
 import 'package:ecom/core/network/api_client.dart';
-import 'package:ecom/features/categories/domain/entities/category_entity.dart';
 import 'package:ecom/features/categories/domain/entities/category_list_entity.dart';
-
-import '../../../../common/entity/meta_data_entity.dart';
 import '../../domain/entities/sub_category_enitity.dart';
 import '../../domain/entities/sub_category_list_entity.dart';
 import '../models/category_model.dart';

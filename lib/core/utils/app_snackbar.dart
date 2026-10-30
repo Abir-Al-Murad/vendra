@@ -104,7 +104,7 @@ class AppSnackBar {
                 width: 32,
                 height: 32,
                 decoration: BoxDecoration(
-                  color: config.color.withOpacity(0.12),
+                  color: config.color.withValues(alpha: 0.12),
                   shape: BoxShape.circle,
                 ),
                 child: Icon(config.icon, size: 17, color: config.color),

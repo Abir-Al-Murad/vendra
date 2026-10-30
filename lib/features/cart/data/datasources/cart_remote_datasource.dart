@@ -1,9 +1,5 @@
 import 'package:ecom/core/network/api_client.dart';
 import 'package:ecom/features/cart/data/models/cart_model.dart';
-import 'package:ecom/features/products/domain/entities/product_list_entity.dart';
-
-import '../../../../common/models/meta_data_model.dart';
-import '../../../products/data/models/product_model.dart';
 
 class CartRemoteDatasource {
   final ApiClient _apiClient;

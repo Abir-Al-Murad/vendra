@@ -74,6 +74,13 @@ class AuthRepositoryImpl implements AuthRepository {
   }
 
   @override
+  Future<String> verifyToken({
+    required String token,
+  }) async {
+    return await _remoteDatasource.verifyToken(token: token);
+  }
+
+  @override
   Future<void> updateLoggedUserData({
     required String name,
     required String email,

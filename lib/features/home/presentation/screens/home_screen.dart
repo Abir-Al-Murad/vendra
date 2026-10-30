@@ -1,5 +1,4 @@
 import 'package:ecom/common/widgets/loading_widget.dart';
-import 'package:ecom/common/widgets/error_widget.dart';
 import 'package:ecom/features/products/presentation/widgets/product_card.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';

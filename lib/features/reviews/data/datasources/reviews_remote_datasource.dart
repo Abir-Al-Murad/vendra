@@ -1,6 +1,5 @@
 import 'package:ecom/core/network/api_client.dart';
 import 'package:ecom/features/reviews/data/models/review_model.dart';
-import 'package:ecom/features/reviews/domain/entities/review_entity.dart';
 import 'package:ecom/features/reviews/domain/entities/review_list_entity.dart';
 
 import '../../../../common/models/meta_data_model.dart';

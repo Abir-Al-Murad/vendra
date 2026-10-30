@@ -104,6 +104,17 @@ class AuthRemoteDatasource {
     }
   }
 
+  Future<String> verifyToken({required String token}) async {
+    final response = await _apiClient.get(
+      "/auth/verifyToken",
+    );
+    if (response.isSuccess) {
+      return response.body['decoded']['id'] as String;
+    } else {
+      throw response.failure ?? Exception("Failed to verify token");
+    }
+  }
+
   Future<void> updateLoggedUserData({required String name, required String email,required String phone}) async {
 
   }
